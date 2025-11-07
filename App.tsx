@@ -22,15 +22,17 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubscribes = [
       onSnapshot(collection(db, 'employees'), (snapshot) => {
-        const fetchedEmployees = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as Employee[];
+        // FIX: Correctly map Firestore doc to Employee type, parsing string doc.id to a number.
+        const fetchedEmployees = snapshot.docs.map(doc => ({ ...(doc.data() as Omit<Employee, 'id'>), id: parseInt(doc.id, 10) }));
         setEmployees(fetchedEmployees);
       }),
       onSnapshot(collection(db, 'attendanceRecords'), (snapshot) => {
+        // FIX: Correctly map Firestore doc to AttendanceRecord, parsing string doc.id to a number and handling timestamps.
         const fetchedRecords = snapshot.docs.map(doc => {
             const data = doc.data();
             return {
-                ...data,
-                id: doc.id,
+                ...(data as Omit<AttendanceRecord, 'id' | 'clockIn' | 'clockOut'>),
+                id: parseInt(doc.id, 10),
                 clockIn: data.clockIn.toDate(),
                 clockOut: data.clockOut ? data.clockOut.toDate() : undefined,
             } as AttendanceRecord;
@@ -38,7 +40,8 @@ const App: React.FC = () => {
         setAttendanceRecords(fetchedRecords);
       }),
       onSnapshot(collection(db, 'stores'), (snapshot) => {
-        const fetchedStores = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as StoreLocation[];
+        // FIX: Correctly map Firestore doc to StoreLocation type, parsing string doc.id to a number.
+        const fetchedStores = snapshot.docs.map(doc => ({ ...(doc.data() as Omit<StoreLocation, 'id'>), id: parseInt(doc.id, 10) }));
         if (fetchedStores.length === 0) {
            // Seed initial data if collection is empty
            const batch = writeBatch(db);
@@ -56,7 +59,8 @@ const App: React.FC = () => {
         setShifts(fetchedShifts);
       }),
       onSnapshot(collection(db, 'schedule'), (snapshot) => {
-        const fetchedSchedule = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as ScheduleEntry[];
+        // FIX: Correctly map Firestore doc to ScheduleEntry type. The doc.id is not part of the ScheduleEntry.
+        const fetchedSchedule = snapshot.docs.map(doc => doc.data() as ScheduleEntry);
         setSchedule(fetchedSchedule);
       }),
     ];
@@ -107,7 +111,8 @@ const App: React.FC = () => {
         }
     } else {
         if (!querySnapshot.empty) {
-            await updateDoc(doc(db, 'schedule', querySnapshot.docs[0].id), updatedEntry);
+            // FIX: Spread the updatedEntry object to avoid type issues with the Firebase SDK's updateDoc function.
+            await updateDoc(doc(db, 'schedule', querySnapshot.docs[0].id), { ...updatedEntry });
         } else {
             await addDoc(collection(db, 'schedule'), updatedEntry);
         }
@@ -182,4 +187,47 @@ const App: React.FC = () => {
     return (
         <div className="min-h-screen flex items-center justify-center">
             <div className="text-center">
-                <
+                <i className="fas fa-spinner fa-spin fa-3x text-blue-600"></i>
+                <p className="mt-4 text-lg font-semibold text-gray-700">Đang tải dữ liệu...</p>
+            </div>
+        </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen text-gray-800">
+      {view === 'kiosk' ? (
+        <KioskView
+          employees={employees}
+          attendanceRecords={attendanceRecords}
+          stores={stores}
+          schedule={schedule}
+          shifts={shifts}
+          onClockIn={handleClockIn}
+          onClockOut={handleClockOut}
+          onSwitchToAdmin={() => setView('admin')}
+        />
+      ) : (
+        <AdminView
+          employees={employees}
+          attendanceRecords={attendanceRecords}
+          stores={stores}
+          schedule={schedule}
+          shifts={shifts}
+          onAddEmployee={handleAddEmployee}
+          onUpdateEmployee={handleUpdateEmployee}
+          onDeleteEmployee={handleDeleteEmployee}
+          onUpdateAttendance={handleUpdateAttendance}
+          onUpdateStore={handleUpdateStore}
+          onUpdateSchedule={handleUpdateSchedule}
+          onUpdateShift={handleUpdateShift}
+          onAddShift={handleAddShift}
+          onDeleteShift={handleDeleteShift}
+          onSwitchToKiosk={() => setView('kiosk')}
+        />
+      )}
+    </div>
+  );
+};
+
+export default App;
