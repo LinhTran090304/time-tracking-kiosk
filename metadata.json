@@ -1,0 +1,7 @@
+{
+  "name": "Time Tracking Kiosk",
+  "description": "A professional time tracking application for a bookstore chain, inspired by Odoo's Time Tracking module. It includes a kiosk mode for employees and an admin dashboard for management.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
