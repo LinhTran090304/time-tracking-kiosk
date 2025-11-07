@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 // FIX: Import 'getDocs' from firebase/firestore
-import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { db } from './firebase'; // Import the Firestore instance
 import { Employee, AttendanceRecord, StoreLocation, Shift, ScheduleEntry } from './types';
 import { INITIAL_EMPLOYEES, INITIAL_STORE_LOCATIONS, INITIAL_SHIFTS, INITIAL_SCHEDULE } from './constants';
@@ -24,7 +24,7 @@ const App: React.FC = () => {
       onSnapshot(collection(db, 'employees'), (snapshot) => {
         // FIX: Correctly map Firestore doc to Employee type, parsing string doc.id to a number.
         const fetchedEmployees = snapshot.docs.map(doc => ({ ...(doc.data() as Omit<Employee, 'id'>), id: parseInt(doc.id, 10) }));
-        setEmployees(fetchedEmployees);
+        setEmployees(fetchedEmployees.sort((a, b) => a.name.localeCompare(b.name)));
       }),
       onSnapshot(collection(db, 'attendanceRecords'), (snapshot) => {
         // FIX: Correctly map Firestore doc to AttendanceRecord, parsing string doc.id to a number and handling timestamps.
@@ -42,12 +42,13 @@ const App: React.FC = () => {
       onSnapshot(collection(db, 'stores'), (snapshot) => {
         // FIX: Correctly map Firestore doc to StoreLocation type, parsing string doc.id to a number.
         const fetchedStores = snapshot.docs.map(doc => ({ ...(doc.data() as Omit<StoreLocation, 'id'>), id: parseInt(doc.id, 10) }));
-        if (fetchedStores.length === 0) {
+        if (snapshot.empty) {
            // Seed initial data if collection is empty
            const batch = writeBatch(db);
            INITIAL_STORE_LOCATIONS.forEach(store => {
-               const docRef = doc(collection(db, 'stores'));
-               batch.set(docRef, store);
+               const { id, ...data } = store;
+               const docRef = doc(db, 'stores', String(id));
+               batch.set(docRef, data);
            });
            batch.commit();
         } else {
@@ -73,7 +74,9 @@ const App: React.FC = () => {
 
 
   const handleClockIn = async (employeeId: number, lateHours?: number) => {
-    await addDoc(collection(db, 'attendanceRecords'), {
+    const newId = Date.now(); // Use a timestamp for a more unique ID
+    const docRef = doc(db, 'attendanceRecords', String(newId));
+    await setDoc(docRef, {
         employeeId,
         clockIn: new Date(),
         lateHours: lateHours || null,
@@ -120,7 +123,9 @@ const App: React.FC = () => {
   };
 
   const handleAddEmployee = async (employee: Omit<Employee, 'id'>) => {
-    await addDoc(collection(db, 'employees'), employee);
+    const newId = Date.now(); // Use a timestamp for a more unique ID
+    const docRef = doc(db, 'employees', String(newId));
+    await setDoc(docRef, employee);
   };
 
   const handleUpdateEmployee = async (updatedEmployee: Employee) => {
@@ -150,7 +155,7 @@ const App: React.FC = () => {
   const handleUpdateAttendance = async (updatedRecord: AttendanceRecord) => {
      const docRef = doc(db, 'attendanceRecords', String(updatedRecord.id));
      const { id, ...dataToUpdate } = updatedRecord;
-     await updateDoc(docRef, dataToUpdate);
+     await updateDoc(docRef, dataToUpdate as any);
   };
 
   const handleUpdateStore = async (updatedStore: StoreLocation) => {
