@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect } from 'react';
-// FIX: Import 'getDocs' from firebase/firestore
 import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { db } from './firebase'; // Import the Firestore instance
 import { Employee, AttendanceRecord, StoreLocation, Shift, ScheduleEntry } from './types';
@@ -20,61 +19,86 @@ const App: React.FC = () => {
 
   // Fetch all data from Firestore on initial load
   useEffect(() => {
-    const unsubscribes = [
-      onSnapshot(collection(db, 'employees'), (snapshot) => {
-        // FIX: Correctly map Firestore doc to Employee type, parsing string doc.id to a number.
-        const fetchedEmployees = snapshot.docs.map(doc => ({ ...(doc.data() as Omit<Employee, 'id'>), id: parseInt(doc.id, 10) }));
-        setEmployees(fetchedEmployees.sort((a, b) => a.name.localeCompare(b.name)));
-      }),
-      onSnapshot(collection(db, 'attendanceRecords'), (snapshot) => {
-        // FIX: Correctly map Firestore doc to AttendanceRecord, parsing string doc.id to a number and handling timestamps.
-        const fetchedRecords = snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-                ...(data as Omit<AttendanceRecord, 'id' | 'clockIn' | 'clockOut'>),
-                id: parseInt(doc.id, 10),
-                clockIn: data.clockIn.toDate(),
-                clockOut: data.clockOut ? data.clockOut.toDate() : undefined,
-            } as AttendanceRecord;
-        });
-        setAttendanceRecords(fetchedRecords);
-      }),
-      onSnapshot(collection(db, 'stores'), (snapshot) => {
-        // FIX: Correctly map Firestore doc to StoreLocation type, parsing string doc.id to a number.
-        const fetchedStores = snapshot.docs.map(doc => ({ ...(doc.data() as Omit<StoreLocation, 'id'>), id: parseInt(doc.id, 10) }));
-        if (snapshot.empty) {
-           // Seed initial data if collection is empty
-           const batch = writeBatch(db);
-           INITIAL_STORE_LOCATIONS.forEach(store => {
-               const { id, ...data } = store;
-               const docRef = doc(db, 'stores', String(id));
-               batch.set(docRef, data);
-           });
-           batch.commit();
-        } else {
-           setStores(fetchedStores);
+    const initializeData = async () => {
+        setIsLoading(true);
+        const batch = writeBatch(db);
+
+        const collectionsToSeed = {
+            stores: { initialData: INITIAL_STORE_LOCATIONS, key: 'id' },
+            employees: { initialData: INITIAL_EMPLOYEES, key: 'id' },
+            shifts: { initialData: INITIAL_SHIFTS, key: 'id' },
+            schedule: { initialData: INITIAL_SCHEDULE, key: null } // No unique ID field in the data itself
+        };
+
+        let batchHasWrites = false;
+
+        for (const [collectionName, config] of Object.entries(collectionsToSeed)) {
+            const collectionRef = collection(db, collectionName);
+            const snapshot = await getDocs(query(collectionRef));
+            if (snapshot.empty) {
+                console.log(`Seeding ${collectionName}...`);
+                batchHasWrites = true;
+                config.initialData.forEach((item: any) => {
+                    if (config.key) {
+                        const { [config.key]: id, ...data } = item;
+                        const docRef = doc(db, collectionName, String(id));
+                        batch.set(docRef, data);
+                    } else {
+                        // For collections like schedule where doc ID is auto-generated
+                        const docRef = doc(collection(db, collectionName));
+                        batch.set(docRef, item);
+                    }
+                });
+            }
         }
-      }),
-       onSnapshot(collection(db, 'shifts'), (snapshot) => {
-        const fetchedShifts = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as Shift[];
-        setShifts(fetchedShifts);
-      }),
-      onSnapshot(collection(db, 'schedule'), (snapshot) => {
-        // FIX: Correctly map Firestore doc to ScheduleEntry type. The doc.id is not part of the ScheduleEntry.
-        const fetchedSchedule = snapshot.docs.map(doc => doc.data() as ScheduleEntry);
-        setSchedule(fetchedSchedule);
-      }),
-    ];
+        
+        if (batchHasWrites) {
+            await batch.commit();
+        }
+    };
+    
+    initializeData().then(() => {
+        const unsubscribes = [
+          onSnapshot(collection(db, 'employees'), (snapshot) => {
+            const fetchedEmployees = snapshot.docs.map(doc => ({ ...(doc.data() as Omit<Employee, 'id'>), id: parseInt(doc.id, 10) }));
+            setEmployees(fetchedEmployees.sort((a, b) => a.name.localeCompare(b.name)));
+          }),
+          onSnapshot(collection(db, 'attendanceRecords'), (snapshot) => {
+            const fetchedRecords = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    ...(data as Omit<AttendanceRecord, 'id' | 'clockIn' | 'clockOut'>),
+                    id: parseInt(doc.id, 10),
+                    clockIn: data.clockIn.toDate(),
+                    clockOut: data.clockOut ? data.clockOut.toDate() : undefined,
+                } as AttendanceRecord;
+            });
+            setAttendanceRecords(fetchedRecords);
+          }),
+          onSnapshot(collection(db, 'stores'), (snapshot) => {
+            const fetchedStores = snapshot.docs.map(doc => ({ ...(doc.data() as Omit<StoreLocation, 'id'>), id: parseInt(doc.id, 10) }));
+            setStores(fetchedStores);
+          }),
+           onSnapshot(collection(db, 'shifts'), (snapshot) => {
+            const fetchedShifts = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as Shift[];
+            setShifts(fetchedShifts);
+          }),
+          onSnapshot(collection(db, 'schedule'), (snapshot) => {
+            const fetchedSchedule = snapshot.docs.map(doc => doc.data() as ScheduleEntry);
+            setSchedule(fetchedSchedule);
+          }),
+        ];
 
-    setIsLoading(false);
+        setIsLoading(false);
 
-    // Cleanup subscriptions on unmount
-    return () => unsubscribes.forEach(unsub => unsub());
+        // Cleanup subscriptions on unmount
+        return () => unsubscribes.forEach(unsub => unsub());
+    });
   }, []);
 
 
   const handleClockIn = async (employeeId: number, lateHours?: number) => {
-    const newId = Date.now(); // Use a timestamp for a more unique ID
+    const newId = Date.now();
     const docRef = doc(db, 'attendanceRecords', String(newId));
     await setDoc(docRef, {
         employeeId,
@@ -114,7 +138,6 @@ const App: React.FC = () => {
         }
     } else {
         if (!querySnapshot.empty) {
-            // FIX: Spread the updatedEntry object to avoid type issues with the Firebase SDK's updateDoc function.
             await updateDoc(doc(db, 'schedule', querySnapshot.docs[0].id), { ...updatedEntry });
         } else {
             await addDoc(collection(db, 'schedule'), updatedEntry);
@@ -123,7 +146,7 @@ const App: React.FC = () => {
   };
 
   const handleAddEmployee = async (employee: Omit<Employee, 'id'>) => {
-    const newId = Date.now(); // Use a timestamp for a more unique ID
+    const newId = Date.now();
     const docRef = doc(db, 'employees', String(newId));
     await setDoc(docRef, employee);
   };
@@ -193,7 +216,7 @@ const App: React.FC = () => {
         <div className="min-h-screen flex items-center justify-center">
             <div className="text-center">
                 <i className="fas fa-spinner fa-spin fa-3x text-blue-600"></i>
-                <p className="mt-4 text-lg font-semibold text-gray-700">Đang tải dữ liệu...</p>
+                <p className="mt-4 text-lg font-semibold text-gray-700">Đang tải và khởi tạo dữ liệu...</p>
             </div>
         </div>
     );
